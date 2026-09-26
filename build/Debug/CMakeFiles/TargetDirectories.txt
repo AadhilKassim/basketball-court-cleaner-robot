@@ -1,7 +1,0 @@
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/CMakeFiles/basketballcourtrobot.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/CMakeFiles/edit_cache.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/CMakeFiles/rebuild_cache.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/cmake/stm32cubemx/CMakeFiles/USB_Device_Library.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/cmake/stm32cubemx/CMakeFiles/edit_cache.dir
-/home/aadhilkassim/Challenges/MC_PROJECT/basketballcourtrobot/build/Debug/cmake/stm32cubemx/CMakeFiles/rebuild_cache.dir
