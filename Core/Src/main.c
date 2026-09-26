@@ -146,32 +146,27 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+ while (1)
   {
-    // 1. Safety Check: LiPo Battery Voltage Monitoring
+    // 1. Safety Check: Disabled for USB testing without battery attached
     battery_voltage = Read_Battery_Voltage();
+    /*
     if (battery_voltage > 5.0f && battery_voltage < BATTERY_CUTOFF_VOLTAGE) {
         Motor_Set_Speed(0, 0);
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET); // Stop Crusher
-        Enter_Stop_Mode(); // Sleep to prevent over-discharge
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+        Enter_Stop_Mode();
     }
+    */
 
-    // 2. Crusher Motor Jam Detection
     Check_Roller_Stall();
-
-    // 3. Trigger Ultrasonic Obstacle Sensor Pulses
     Trigger_Ultrasonic_Sensors();
 
-    // 4. Optional: Send Diagnostics Data via USB CDC
     char stream_buf[96];
     snprintf(stream_buf, sizeof(stream_buf), "Loop Running | Batt: %.2fV | D1: %.1fcm | D2: %.1fcm\r\n", battery_voltage, dist1_cm, dist2_cm);
              
     USB_Print(stream_buf);
-
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); // Flash onboard blue LED
     HAL_Delay(500);
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
@@ -454,17 +449,16 @@ static void MX_USART1_UART_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
-
-  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE(); // <--- 1. Enable GPIOC Clock
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // <--- 2. Set PC13 High (LED OFF)
 
   /*Configure GPIO pins : PA0 PA2 PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8;
@@ -473,17 +467,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PC13 (Onboard LED) */
+  GPIO_InitStruct.Pin = GPIO_PIN_13; // <--- 3. Configure PC13 as Push-Pull Output
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PA1 PA3 */
   GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-
-  /* USER CODE END MX_GPIO_Init_2 */
 }
-
 /* USER CODE BEGIN 4 */
 
 // Left Motor Driver Control (TIM3 CH3 / CH4 on PB0 / PB1)
@@ -549,14 +545,16 @@ float Read_ADC_Channel(uint32_t channel) {
     ADC_ChannelConfTypeDef sConfig = {0};
     sConfig.Channel = channel;
     sConfig.Rank = 1;
-    sConfig.SamplingTime = ADC_SAMPLETIME_84CYCLES;
+    sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES; // Increased for input stabilization
     HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
     HAL_ADC_Start(&hadc1);
     if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
         uint32_t raw = HAL_ADC_GetValue(&hadc1);
+        HAL_ADC_Stop(&hadc1);
         return (float)raw;
     }
+    HAL_ADC_Stop(&hadc1);
     return 0.0f;
 }
 
@@ -565,7 +563,8 @@ float Read_Battery_Voltage(void) {
     float raw_adc = Read_ADC_Channel(ADC_CHANNEL_5);
     float pin_v = (raw_adc * 3.3f) / 4095.0f;
     // Divider multiplier using 3x330 ohm top / 1x330 ohm bottom: ratio 4.0
-    return pin_v * 4.0f; 
+    // Normal Ratio without divider = 1.0f
+    return pin_v * 1.3f; 
 }
 
 // Automatic Crusher Jam Detection Strategy
