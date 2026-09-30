@@ -564,7 +564,7 @@ float Read_Battery_Voltage(void) {
     float pin_v = (raw_adc * 3.3f) / 4095.0f;
     // Divider multiplier using 3x330 ohm top / 1x330 ohm bottom: ratio 4.0
     // Normal Ratio without divider = 1.0f
-    return pin_v * 1.3f; 
+    return pin_v * 1.0f; 
 }
 
 // Automatic Crusher Jam Detection Strategy
