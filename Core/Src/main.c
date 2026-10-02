@@ -25,6 +25,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "usbd_cdc_if.h"
+#include "stm32f4xx_hal_tim.h"  // <--- Required for __HAL_TIM_GET_COUNTER, __HAL_TIM_SET_COMPARE, HAL_TIM_PWM_Start
+#include "stm32f4xx_hal_uart.h" // <--- Required for HAL_UART_Receive_IT, UART_HandleTypeDef
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -125,18 +127,21 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  // Enable Motor Driver Logic Gates via PA15
+  // 1. Start TIM3 counter base for ultrasonic echo pulse timing
+  HAL_TIM_Base_Start(&htim3);
+
+  // 2. Enable Motor Driver Logic Gates via PA15
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
 
-  // Start PWM Timer Channels for Left Motor Driver (TIM3 CH3 & CH4)
+  // 3. Start PWM Timer Channels for Left Motor Driver (TIM3 CH3 & CH4)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // PB0 - Left RPWM
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // PB1 - Left LPWM
 
-  // Start PWM Timer Channels for Right Motor Driver (TIM4 CH3 & CH4)
+  // 4. Start PWM Timer Channels for Right Motor Driver (TIM4 CH3 & CH4)
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3); // PB8 - Right RPWM
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4); // PB9 - Right LPWM
 
-  // Arm Bluetooth Interrupt Listener
+  // 5. Arm Bluetooth Interrupt Listener
   HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
 
   HAL_Delay(2000);
@@ -564,7 +569,7 @@ float Read_Battery_Voltage(void) {
     float pin_v = (raw_adc * 3.3f) / 4095.0f;
     // Divider multiplier using 3x330 ohm top / 1x330 ohm bottom: ratio 4.0
     // Normal Ratio without divider = 1.0f
-    return pin_v * 1.0f; 
+    return pin_v * 4.251f; 
 }
 
 // Automatic Crusher Jam Detection Strategy
@@ -601,7 +606,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
             echo1_t1 = __HAL_TIM_GET_COUNTER(&htim3);
         } else {
             echo1_t2 = __HAL_TIM_GET_COUNTER(&htim3);
-            dist1_cm = (float)(echo1_t2 - echo1_t1) * 0.017f;
+            uint32_t diff = (echo1_t2 >= echo1_t1) ? (echo1_t2 - echo1_t1) : ((1000 - echo1_t1) + echo1_t2);
+            dist1_cm = (float)diff * 0.017f;
         }
     }
     if (GPIO_Pin == GPIO_PIN_3) { // Echo 2 (PA3)
@@ -609,7 +615,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
             echo2_t1 = __HAL_TIM_GET_COUNTER(&htim3);
         } else {
             echo2_t2 = __HAL_TIM_GET_COUNTER(&htim3);
-            dist2_cm = (float)(echo2_t2 - echo2_t1) * 0.017f;
+            uint32_t diff = (echo2_t2 >= echo2_t1) ? (echo2_t2 - echo2_t1) : ((1000 - echo2_t2) + echo2_t2);
+            dist2_cm = (float)diff * 0.017f;
         }
     }
 }
@@ -626,12 +633,12 @@ void Trigger_Ultrasonic_Sensors(void) {
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
 }
 
-// Helper to handle CDC Tx state and prevent buffer overwrites
+// Non-blocking USB Print Utility
 void USB_Print(const char *str) {
-    uint8_t retry = 0;
-    while (CDC_Transmit_FS((uint8_t *)str, strlen(str)) == USBD_BUSY) {
-        HAL_Delay(1);
-        if (++retry > 100) break;
+    // Try to transmit once. If busy, skip this frame to prevent locking up the main loop.
+    uint8_t result = CDC_Transmit_FS((uint8_t *)str, strlen(str));
+    if (result == USBD_BUSY) {
+        // Buffer is full (host terminal not reading). Drop packet gracefully.
     }
 }
 
