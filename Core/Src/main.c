@@ -83,6 +83,8 @@ void Enter_Stop_Mode(void);
 void Trigger_Ultrasonic_Sensors(void);
 void USB_Print(const char *str);
 void USB_Send_Initial_Boot_Log(void);
+void Delay_us(uint16_t us);
+float Read_Ultrasonic_Distance(uint16_t trig_pin, uint16_t echo_pin);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -127,7 +129,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  // 1. Start TIM3 counter base for ultrasonic echo pulse timing
+  // 1. Start TIM3 counter base for microsecond delays
   HAL_TIM_Base_Start(&htim3);
 
   // 2. Enable Motor Driver Logic Gates via PA15
@@ -151,10 +153,11 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
- while (1)
+  while (1)
   {
-    // 1. Safety Check: Disabled for USB testing without battery attached
+    // 1. Read Battery Voltage
     battery_voltage = Read_Battery_Voltage();
+
     /*
     if (battery_voltage > 5.0f && battery_voltage < BATTERY_CUTOFF_VOLTAGE) {
         Motor_Set_Speed(0, 0);
@@ -163,19 +166,38 @@ int main(void)
     }
     */
 
+    // 2. Crusher Stall Check
     Check_Roller_Stall();
-    Trigger_Ultrasonic_Sensors();
+
+    // 3. Read Ultrasonic Sensor Distances via Direct Polling
+    dist1_cm = Read_Ultrasonic_Distance(GPIO_PIN_0, GPIO_PIN_1); // Trig: PA0, Echo: PA1
+    HAL_Delay(20); // Gap to prevent acoustic cross-talk
+    dist2_cm = Read_Ultrasonic_Distance(GPIO_PIN_2, GPIO_PIN_3); // Trig: PA2, Echo: PA3
+
+    // 4. Format Telemetry Strings using Integer Conversion (Nano.specs compatible)
+    uint16_t b_volts = (uint16_t)battery_voltage;
+    uint16_t b_cents = (uint16_t)((battery_voltage - b_volts) * 100.0f);
+
+    uint16_t d1_w = (uint16_t)dist1_cm;
+    uint16_t d1_f = (uint16_t)((dist1_cm - d1_w) * 10.0f);
+
+    uint16_t d2_w = (uint16_t)dist2_cm;
+    uint16_t d2_f = (uint16_t)((dist2_cm - d2_w) * 10.0f);
 
     char stream_buf[96];
-    snprintf(stream_buf, sizeof(stream_buf), "Loop Running | Batt: %.2fV | D1: %.1fcm | D2: %.1fcm\r\n", battery_voltage, dist1_cm, dist2_cm);
+    snprintf(stream_buf, sizeof(stream_buf), 
+             "Loop Running | Batt: %u.%02uV | D1: %u.%ucm | D2: %u.%ucm\r\n", 
+             b_volts, b_cents, d1_w, d1_f, d2_w, d2_f);
              
     USB_Print(stream_buf);
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); // Flash onboard blue LED
     HAL_Delay(500);
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
-
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -326,9 +348,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 9;
+  htim3.Init.Prescaler = 95;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 999;
+  htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
@@ -459,11 +481,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE(); // <--- 1. Enable GPIOC Clock
+  __HAL_RCC_GPIOC_CLK_ENABLE(); // Onboard Blue LED Clock
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // <--- 2. Set PC13 High (LED OFF)
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // Set PC13 High (LED OFF)
 
   /*Configure GPIO pins : PA0 PA2 PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8;
@@ -473,15 +495,15 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PC13 (Onboard LED) */
-  GPIO_InitStruct.Pin = GPIO_PIN_13; // <--- 3. Configure PC13 as Push-Pull Output
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA1 PA3 */
+  /*Configure GPIO pins : PA1 PA3 (Echo Inputs - Rising & Falling Edges) */
   GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 }
@@ -550,7 +572,7 @@ float Read_ADC_Channel(uint32_t channel) {
     ADC_ChannelConfTypeDef sConfig = {0};
     sConfig.Channel = channel;
     sConfig.Rank = 1;
-    sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES; // Increased for input stabilization
+    sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
     HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
     HAL_ADC_Start(&hadc1);
@@ -567,17 +589,15 @@ float Read_ADC_Channel(uint32_t channel) {
 float Read_Battery_Voltage(void) {
     float raw_adc = Read_ADC_Channel(ADC_CHANNEL_5);
     float pin_v = (raw_adc * 3.3f) / 4095.0f;
-    // Divider multiplier using 3x330 ohm top / 1x330 ohm bottom: ratio 4.0
-    // Normal Ratio without divider = 1.0f
     return pin_v * 4.251f; 
 }
 
 // Automatic Crusher Jam Detection Strategy
 void Check_Roller_Stall(void) {
     float current_raw = Read_ADC_Channel(ADC_CHANNEL_4);
-    if (current_raw > CURRENT_JAM_THRESHOLD) { // Over-current spike detected
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET); // Turn OFF Crusher Motor
-        Motor_Set_Speed(-600, -600); // Back up briefly to clear debris
+    if (current_raw > CURRENT_JAM_THRESHOLD) {
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+        Motor_Set_Speed(-600, -600);
         HAL_Delay(800);
         Motor_Set_Speed(0, 0);
     }
@@ -586,8 +606,8 @@ void Check_Roller_Stall(void) {
 // Low-Power STOP Mode Execution
 void Enter_Stop_Mode(void) {
     Motor_Set_Speed(0, 0);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET); // Disable BTS7960 Drivers
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);  // Turn OFF Crusher
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 
     HAL_SuspendTick();
     HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -596,49 +616,56 @@ void Enter_Stop_Mode(void) {
 
     SystemClock_Config();
     HAL_ResumeTick();
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);   // Re-enable Drivers
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
 }
 
-// Ultrasonic Echo Pulse Distance Calculation
+// Ultrasonic Echo Interrupt Callback
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if (GPIO_Pin == GPIO_PIN_1) { // Echo 1 (PA1)
+    if (GPIO_Pin == GPIO_PIN_1) { // Echo Sensor 1 (PA1)
         if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_SET) {
             echo1_t1 = __HAL_TIM_GET_COUNTER(&htim3);
         } else {
             echo1_t2 = __HAL_TIM_GET_COUNTER(&htim3);
-            uint32_t diff = (echo1_t2 >= echo1_t1) ? (echo1_t2 - echo1_t1) : ((1000 - echo1_t1) + echo1_t2);
-            dist1_cm = (float)diff * 0.017f;
+            uint32_t duration = (echo1_t2 >= echo1_t1) ? (echo1_t2 - echo1_t1) : ((65535 - echo1_t1) + echo1_t2);
+            dist1_cm = (float)duration * 0.01715f;
         }
     }
-    if (GPIO_Pin == GPIO_PIN_3) { // Echo 2 (PA3)
+    if (GPIO_Pin == GPIO_PIN_3) { // Echo Sensor 2 (PA3)
         if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3) == GPIO_PIN_SET) {
             echo2_t1 = __HAL_TIM_GET_COUNTER(&htim3);
         } else {
             echo2_t2 = __HAL_TIM_GET_COUNTER(&htim3);
-            uint32_t diff = (echo2_t2 >= echo2_t1) ? (echo2_t2 - echo2_t1) : ((1000 - echo2_t2) + echo2_t2);
-            dist2_cm = (float)diff * 0.017f;
+            uint32_t duration = (echo2_t2 >= echo2_t1) ? (echo2_t2 - echo2_t1) : ((65535 - echo2_t2) + echo2_t2);
+            dist2_cm = (float)duration * 0.01715f;
         }
     }
+}
+
+// Precise microsecond delay using running TIM3 counter
+void Delay_us(uint16_t us) {
+    uint16_t start = __HAL_TIM_GET_COUNTER(&htim3);
+    while ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - start) < us);
 }
 
 void Trigger_Ultrasonic_Sensors(void) {
     // Pulse PA0 (Trigger 1)
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);
-    for (volatile int i = 0; i < 100; i++);
+    Delay_us(12); // 12 us pulse guarantees > 10us threshold
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);
+
+    Delay_us(10);
 
     // Pulse PA2 (Trigger 2)
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_SET);
-    for (volatile int i = 0; i < 100; i++);
+    Delay_us(12);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
 }
 
 // Non-blocking USB Print Utility
 void USB_Print(const char *str) {
-    // Try to transmit once. If busy, skip this frame to prevent locking up the main loop.
     uint8_t result = CDC_Transmit_FS((uint8_t *)str, strlen(str));
     if (result == USBD_BUSY) {
-        // Buffer is full (host terminal not reading). Drop packet gracefully.
+        // Buffer is full; drop frame gracefully to prevent MCU stalls
     }
 }
 
@@ -677,6 +704,35 @@ void USB_Send_Initial_Boot_Log(void) {
     USB_Print("System operational. Entering autonomous loop...\r\n\r\n");
 }
 
+// Ultrasonic Polling Utility
+float Read_Ultrasonic_Distance(uint16_t trig_pin, uint16_t echo_pin) {
+    uint32_t t1 = 0, t2 = 0;
+    uint32_t timeout = 30000; // ~30ms max timeout
+
+    // Send 12us HIGH Trigger Pulse
+    HAL_GPIO_WritePin(GPIOA, trig_pin, GPIO_PIN_SET);
+    Delay_us(12);
+    HAL_GPIO_WritePin(GPIOA, trig_pin, GPIO_PIN_RESET);
+
+    // Wait for Echo Pin to go HIGH
+    while (HAL_GPIO_ReadPin(GPIOA, echo_pin) == GPIO_PIN_RESET) {
+        if (--timeout == 0) return 0.0f;
+    }
+    t1 = __HAL_TIM_GET_COUNTER(&htim3);
+
+    // Wait for Echo Pin to go LOW
+    timeout = 30000;
+    while (HAL_GPIO_ReadPin(GPIOA, echo_pin) == GPIO_PIN_SET) {
+        if (--timeout == 0) return 0.0f;
+    }
+    t2 = __HAL_TIM_GET_COUNTER(&htim3);
+
+    // Compute duration considering 16-bit timer overflow
+    uint32_t duration = (t2 >= t1) ? (t2 - t1) : ((65535 - t1) + t2);
+    
+    return (float)duration * 0.01715f; 
+}
+
 /* USER CODE END 4 */
 
 /**
@@ -692,6 +748,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
+
 #ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
