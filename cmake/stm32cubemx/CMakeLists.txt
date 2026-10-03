@@ -81,8 +81,7 @@ set(MX_LINK_DIRS
 set(MX_LINK_LIBS 
     STM32_Drivers
     ${TOOLCHAIN_LINK_LIBRARIES}
-    USB_Device_Library
-	
+    USB_Device_Library	
 )
 # Interface library for includes and symbols
 add_library(stm32cubemx INTERFACE)
@@ -105,11 +104,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${MX_Application_Src})
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${MX_LINK_DIRS})
-
-# Add link options to the project
-target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
-    -u _printf_float   # <--- Add this linker flag
-)
 
 # Add libraries to the project
 target_link_libraries(${CMAKE_PROJECT_NAME} ${MX_LINK_LIBS})
