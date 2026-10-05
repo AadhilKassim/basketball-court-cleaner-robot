@@ -57,6 +57,8 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 uint8_t rx_byte;
+volatile uint8_t pending_cmd = 0;       // Stores pending BT byte for the main loop
+volatile uint8_t bt_cmd_flag = 0;       // Signals main loop that a command arrived
 volatile uint32_t echo1_t1 = 0, echo1_t2 = 0;
 volatile uint32_t echo2_t1 = 0, echo2_t2 = 0;
 volatile float dist1_cm = 0.0f, dist2_cm = 0.0f;
@@ -75,13 +77,13 @@ static void MX_USART1_UART_Init(void);
 void Motor_Set_Left(int16_t speed);
 void Motor_Set_Right(int16_t speed);
 void Motor_Set_Speed(int16_t left, int16_t right);
+void USB_Print(const char *str);
 void Process_Bluetooth_Command(uint8_t cmd);
 float Read_ADC_Channel(uint32_t channel);
 float Read_Battery_Voltage(void);
 void Check_Roller_Stall(void);
 void Enter_Stop_Mode(void);
 void Trigger_Ultrasonic_Sensors(void);
-void USB_Print(const char *str);
 void USB_Send_Initial_Boot_Log(void);
 void Delay_us(uint16_t us);
 float Read_Ultrasonic_Distance(uint16_t trig_pin, uint16_t echo_pin);
@@ -153,28 +155,27 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+while (1)
   {
+    // Check if a Bluetooth command was received in the background
+    if (bt_cmd_flag) {
+        uint8_t cmd_to_process = pending_cmd;
+        bt_cmd_flag = 0; // Clear flag
+        Process_Bluetooth_Command(cmd_to_process); // Safe to run USB_Print here
+    }
+
     // 1. Read Battery Voltage
     battery_voltage = Read_Battery_Voltage();
-
-    /*
-    if (battery_voltage > 5.0f && battery_voltage < BATTERY_CUTOFF_VOLTAGE) {
-        Motor_Set_Speed(0, 0);
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
-        Enter_Stop_Mode();
-    }
-    */
 
     // 2. Crusher Stall Check
     Check_Roller_Stall();
 
-    // 3. Read Ultrasonic Sensor Distances via Direct Polling
-    dist1_cm = Read_Ultrasonic_Distance(GPIO_PIN_0, GPIO_PIN_1); // Trig: PA0, Echo: PA1
-    HAL_Delay(20); // Gap to prevent acoustic cross-talk
-    dist2_cm = Read_Ultrasonic_Distance(GPIO_PIN_2, GPIO_PIN_3); // Trig: PA2, Echo: PA3
+    // 3. Read Ultrasonic Sensor Distances
+    dist1_cm = Read_Ultrasonic_Distance(GPIO_PIN_0, GPIO_PIN_1); 
+    HAL_Delay(20); 
+    dist2_cm = Read_Ultrasonic_Distance(GPIO_PIN_2, GPIO_PIN_3); 
 
-    // 4. Format Telemetry Strings using Integer Conversion (Nano.specs compatible)
+    // 4. Print telemetry stream
     uint16_t b_volts = (uint16_t)battery_voltage;
     uint16_t b_cents = (uint16_t)((battery_voltage - b_volts) * 100.0f);
 
@@ -190,11 +191,8 @@ int main(void)
              b_volts, b_cents, d1_w, d1_f, d2_w, d2_f);
              
     USB_Print(stream_buf);
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); // Flash onboard blue LED
-    HAL_Delay(500);
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); 
+    HAL_Delay(300);
   }
   /* USER CODE END 3 */
 }
@@ -507,7 +505,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 }
-/* USER CODE BEGIN 4 */
 
 // Left Motor Driver Control (TIM3 CH3 / CH4 on PB0 / PB1)
 void Motor_Set_Left(int16_t speed) {
@@ -542,30 +539,82 @@ void Motor_Set_Speed(int16_t left, int16_t right) {
     Motor_Set_Right(right);
 }
 
-// Bluetooth Communication Callback
+
+/* USER CODE BEGIN 4 */
+
+// 1. FAST & SAFE ISR: Non-blocking, no USB printing here!
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     if (huart->Instance == USART1) {
-        Process_Bluetooth_Command(rx_byte);
+        // Filter out carriage returns, line feeds, and spaces immediately
+        if (rx_byte != '\r' && rx_byte != '\n' && rx_byte != ' ' && rx_byte != 0x00) {
+            pending_cmd = rx_byte;
+            bt_cmd_flag = 1; // Hand off to main loop
+        }
+        
+        // Re-arm interrupt for next byte
         HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
     }
 }
 
+// 2. Executed safely in the main thread context
 void Process_Bluetooth_Command(uint8_t cmd) {
+    char bt_log[64];
+    snprintf(bt_log, sizeof(bt_log), "\r\n>>> [BT CMD RECEIVED]: '%c' (0x%02X)\r\n", cmd, cmd);
+    USB_Print(bt_log);
+
     switch (cmd) {
-        case 'F': Motor_Set_Speed(700, 700); break;   // Forward
-        case 'B': Motor_Set_Speed(-700, -700); break; // Reverse
-        case 'L': Motor_Set_Speed(-500, 500); break;  // Spin Left
-        case 'R': Motor_Set_Speed(500, -500); break;  // Spin Right
-        case 'S': Motor_Set_Speed(0, 0); break;       // Stop
-        case 'C':                                     // Toggle Crusher Motor
-            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_8);
+        case 'F': case 'f':
+            Motor_Set_Speed(700, 700);
+            USB_Print("    └─ Action: Moving FORWARD\r\n");
             break;
-        case 'Z':                                     // Enter Sleep Mode
+
+        case 'B': case 'b':
+            Motor_Set_Speed(-700, -700);
+            USB_Print("    └─ Action: Moving REVERSE\r\n");
+            break;
+
+        case 'L': case 'l':
+            Motor_Set_Speed(-500, 500);
+            USB_Print("    └─ Action: Spinning LEFT\r\n");
+            break;
+
+        case 'R': case 'r':
+            Motor_Set_Speed(500, -500);
+            USB_Print("    └─ Action: Spinning RIGHT\r\n");
+            break;
+
+        case 'S': case 's':
+            Motor_Set_Speed(0, 0);
+            USB_Print("    └─ Action: STOP All Motors\r\n");
+            break;
+
+        case 'C': case 'c':
+            HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_8);
+            USB_Print("    └─ Action: Toggled Crusher Motor (PA8)\r\n");
+            break;
+
+        case 'Z': case 'z':
+            USB_Print("    └─ Action: Entering Low-Power STOP Mode\r\n");
             Enter_Stop_Mode();
             break;
-        default: break;
+
+        default:
+            break;
     }
 }
+
+// 3. Non-blocking USB Print helper
+void USB_Print(const char *str) {
+    uint8_t result;
+    uint16_t retry = 1000;
+    
+    // Poll without calling HAL_Delay
+    do {
+        result = CDC_Transmit_FS((uint8_t *)str, strlen(str));
+        if (result == USBD_OK) break;
+    } while (--retry > 0);
+}
+
 
 // Single-Channel ADC Polling Utility
 float Read_ADC_Channel(uint32_t channel) {
@@ -661,13 +710,7 @@ void Trigger_Ultrasonic_Sensors(void) {
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
 }
 
-// Non-blocking USB Print Utility
-void USB_Print(const char *str) {
-    uint8_t result = CDC_Transmit_FS((uint8_t *)str, strlen(str));
-    if (result == USBD_BUSY) {
-        // Buffer is full; drop frame gracefully to prevent MCU stalls
-    }
-}
+
 
 // Diagnostics Dump Executed On Boot
 void USB_Send_Initial_Boot_Log(void) {
