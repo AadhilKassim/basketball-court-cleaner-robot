@@ -107,6 +107,25 @@ reset the board and check available serial devices with `ls /dev/ttyACM*`.
 On systems where the device cannot be opened, add your user to the OS serial
 device group or run the terminal command with the appropriate permissions.
 
+## Bluetooth RFCOMM serial output
+
+Connect to the Bluetooth serial device using its MAC address and RFCOMM
+channel:
+
+```sh
+sudo rfcomm connect rfcomm0 00:26:01:00:07:A4 1
+```
+
+While the connection is active, open the serial terminal in another shell:
+
+```sh
+picocom -b 9600 /dev/rfcomm0
+```
+
+Press `Ctrl+C` in `picocom` to stop the serial terminal, then press `Ctrl+C`
+in the `rfcomm` shell to disconnect `/dev/rfcomm0`. Replace the Bluetooth MAC
+address and RFCOMM channel when using a different device.
+
 ## Troubleshooting
 
 - Re-run `cmake --preset Debug` after changing the toolchain or CMake files.
