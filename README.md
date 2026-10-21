@@ -37,6 +37,9 @@ it does not yet contain a path-planning or court-coverage algorithm.
 | Diagnostics | USB CDC | Boot log and periodic telemetry |
 | Onboard status LED | GPIO `PC13` | Toggled once per main-loop cycle |
 
+See [CONNECTIONS.md](CONNECTIONS.md) for the complete pinout, power distribution,
+subsystem wiring, and netlist reference.
+
 I2C1 is initialized at `100 kHz` for future or connected peripherals, but the
 current application does not actively exchange data over I2C.
 

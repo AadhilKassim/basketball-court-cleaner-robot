@@ -116,7 +116,7 @@ channel:
 sudo rfcomm connect rfcomm0 00:26:01:00:07:A4 1
 ```
 
-While the connection is active, open the serial terminal in another shell:
+While the connection is active, open the serial terminal in another shell:picocom -b 9600 /dev/rfcomm0
 
 ```sh
 picocom -b 9600 /dev/rfcomm0
