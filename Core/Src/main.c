@@ -16,6 +16,7 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_device.h"
@@ -47,12 +48,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-
 I2C_HandleTypeDef hi2c1;
-
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
-
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
@@ -73,6 +71,7 @@ static void MX_I2C1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
+
 /* USER CODE BEGIN PFP */
 void Motor_Set_Left(int16_t speed);
 void Motor_Set_Right(int16_t speed);
@@ -89,7 +88,7 @@ void Delay_us(uint16_t us);
 float Read_Ultrasonic_Distance(uint16_t trig_pin, uint16_t echo_pin);
 /* USER CODE END PFP */
 
-/* Private user code ---------------------------------------------------------*/
+/* Private user code --------------------------------------------------------- */
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
@@ -129,6 +128,7 @@ int main(void)
   MX_TIM4_Init();
   MX_USART1_UART_Init();
   MX_USB_DEVICE_Init();
+
   /* USER CODE BEGIN 2 */
 
   // 1. Start TIM3 counter base for microsecond delays
@@ -155,7 +155,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-while (1)
+  while (1)
   {
     // Check if a Bluetooth command was received in the background
     if (bt_cmd_flag) {
@@ -196,6 +196,7 @@ while (1)
   }
   /* USER CODE END 3 */
 }
+
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -346,9 +347,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 95;
+  htim3.Init.Prescaler = 9;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
+  htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
@@ -481,25 +482,25 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE(); // Onboard Blue LED Clock
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8, GPIO_PIN_RESET);
+  /* Configure Output Pin Levels */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8|GPIO_PIN_15, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET); // Set PC13 High (LED OFF)
 
-  /*Configure GPIO pins : PA0 PA2 PA8 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8;
+  /* Configure GPIO Pins: PA0 (Trig1), PA2 (Trig2), PA8 (Crusher Gate), PA15 (BTS Enable) */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_2|GPIO_PIN_8|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PC13 (Onboard LED) */
+  /* Configure Onboard LED (PC13) */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA1 PA3 (Echo Inputs - Rising & Falling Edges) */
+  /* Configure Echo Inputs: PA1 (Echo1), PA3 (Echo2) */
   GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -538,7 +539,6 @@ void Motor_Set_Speed(int16_t left, int16_t right) {
     Motor_Set_Left(left);
     Motor_Set_Right(right);
 }
-
 
 /* USER CODE BEGIN 4 */
 
@@ -614,7 +614,6 @@ void USB_Print(const char *str) {
         if (result == USBD_OK) break;
     } while (--retry > 0);
 }
-
 
 // Single-Channel ADC Polling Utility
 float Read_ADC_Channel(uint32_t channel) {
@@ -709,8 +708,6 @@ void Trigger_Ultrasonic_Sensors(void) {
     Delay_us(12);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
 }
-
-
 
 // Diagnostics Dump Executed On Boot
 void USB_Send_Initial_Boot_Log(void) {
